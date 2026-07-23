@@ -34,6 +34,27 @@ HEARTBEAT_FILE = os.path.join(TEMP, "codex_rpc_daemon.json")
 LOG_FILE = os.path.join(TEMP, "codex_rpc_daemon.log")
 
 DEFAULT_APP_ID = "1529700871901020310"
+CONFIG_FILE = os.path.join(os.environ.get("APPDATA") or TEMP, "codex-rpc.json")
+
+
+def get_app_id() -> str:
+    """Env var wins, then the ID saved from the UI, then the baked-in default."""
+    app_id = (os.environ.get("CODEX_DISCORD_APP_ID") or "").strip()
+    if app_id:
+        return app_id
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            saved = str(json.load(f).get("app_id") or "").strip()
+        if saved:
+            return saved
+    except Exception:
+        pass
+    return DEFAULT_APP_ID
+
+
+def save_app_id(app_id: str) -> None:
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump({"app_id": app_id.strip()}, f)
 
 TICK_SECONDS = 5          # CPU sample + heartbeat cadence
 CPU_THRESHOLD = float(os.environ.get("CODEX_RPC_CPU_THRESHOLD", "0.5"))  # % of one core
@@ -234,7 +255,7 @@ def connect(app_id: str):
 def daemon_mode() -> int:
     import psutil
 
-    app_id = os.environ.get("CODEX_DISCORD_APP_ID") or DEFAULT_APP_ID
+    app_id = get_app_id()
 
     if daemon_pid():
         log("daemon already running; exiting")
@@ -509,6 +530,36 @@ def ui_mode() -> int:
     ctlrow = tk.Frame(root, bg=BG)
     ctlrow.grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
     styled_btn(ctlrow, "Stop daemon", stop_daemon).pack(side="left")
+
+    tk.Label(ctlrow, text="Application ID", bg=BG, fg=DIM,
+             font=("Segoe UI", 9)).pack(side="left", padx=(16, 8))
+    id_var = tk.StringVar(value=get_app_id())
+    tk.Entry(ctlrow, textvariable=id_var, bg=CARD, fg=FG, insertbackground=FG,
+             relief="flat", width=22, font=("Consolas", 9)).pack(side="left",
+                                                                 padx=(0, 8))
+
+    def save_id():
+        val = id_var.get().strip()
+        if not val.isdigit():
+            msg_var.set("App ID must be a number (from discord.com/developers).")
+            return
+        try:
+            save_app_id(val)
+        except OSError as exc:
+            msg_var.set(f"Could not save: {exc}")
+            return
+        env = (os.environ.get("CODEX_DISCORD_APP_ID") or "").strip()
+        if env and env != val:
+            msg_var.set("Saved — but the CODEX_DISCORD_APP_ID env var overrides it.")
+        else:
+            msg_var.set("Application ID saved.")
+        if daemon_pid():  # restart so the daemon reconnects with the new ID
+            stop_daemon()
+            start_daemon()
+
+    tk.Button(ctlrow, text="Save", command=save_id, bg=CARD, fg=FG,
+              activebackground="#404249", activeforeground=FG, relief="flat",
+              font=("Segoe UI", 9), padx=12, pady=2).pack(side="left")
 
     log_box = tk.Text(root, height=5, width=86, bg=CARD, fg=DIM, relief="flat",
                       font=("Consolas", 8), state="disabled", padx=8, pady=6)

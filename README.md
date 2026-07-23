@@ -30,7 +30,7 @@ Re-attach any time from the UI; the daemon follows within 5 s without restarting
 
 ## Setup
 
-1. Create a Discord application at <https://discord.com/developers/applications> — its **name** is the banner title (e.g. "Codex"). Upload a 512×512 PNG asset named exactly **`codex`** under Rich Presence → Art Assets. Set the app ID via `setx CODEX_DISCORD_APP_ID <id>` (or edit `DEFAULT_APP_ID` in the source).
+1. Create a Discord application at <https://discord.com/developers/applications> — its **name** is the banner title (e.g. "Codex"). Upload a 512×512 PNG asset named exactly **`codex`** under Rich Presence → Art Assets. Enter the Application ID in the UI's **Application ID** field and hit **Save** (stored in `%APPDATA%\codex-rpc.json`; a running daemon restarts automatically). The `CODEX_DISCORD_APP_ID` env var overrides the saved value if set.
 2. Build (Windows, Python 3.11+):
 
 ```powershell

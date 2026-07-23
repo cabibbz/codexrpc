@@ -1,6 +1,8 @@
-# codexrpc — Discord Rich Presence for OpenAI Codex
+﻿# codexrpc — Discord Rich Presence for OpenAI Codex
 
 A live Discord activity banner for OpenAI Codex — both the **CLI** and the **desktop app**. Codex exposes no hook system covering both clients, so `codex-rpc.exe` attaches to a process you pick (by PID) and derives a coarse state from its CPU activity, labeling the banner with the process's **window title** (what Task Manager shows), tracked live.
+
+**Download:** grab `codex-rpc-win64.zip` from [Releases](https://github.com/cabibbz/codexrpc/releases) — no Python needed. Unzip, keep the EXE next to its `_internal` folder, double-click.
 
 Sibling project: [clauderpc](https://github.com/cabibbz/clauderpc) does the same for Claude Code via its hook system.
 

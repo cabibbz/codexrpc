@@ -42,7 +42,19 @@ py -m PyInstaller --onedir --noconsole --icon codex-rpc.ico --add-data "codex-rp
 
 `--icon` sets the EXE's file icon; `--add-data` ships the same `.ico` inside the bundle so the app window and taskbar entry use it too. To regenerate the icon from other artwork: `py make_icons.py <source-image> codex-rpc.ico preview.png --tile` (the `--tile` flag puts monochrome art on a white rounded tile — without it, black artwork is invisible on a dark taskbar).
 
-3. Double-click `dist\codex-rpc\codex-rpc.exe`, pick your Codex process, **Attach & start**.
+3. Double-click `dist\codex-rpc\codex-rpc.exe`, pick your Codex process, **Attach & start**. Tick **Start at login** to have the daemon come up automatically (a Startup-folder shortcut, no admin rights needed).
+
+## Checking your setup
+
+**Click "Check my setup"** for a read-only diagnostic covering every way this can silently do nothing:
+
+- Application ID present, and whether it came from the env var, your saved value, or the built-in default
+- The Discord app exists (a wrong ID reports "Discord doesn't recognise this" instead of failing silently), its **name** — which is the banner's title line — and whether the `codex` art asset is actually uploaded, since a missing asset quietly falls back to your app icon and looks fine
+- Daemon running and connected to Discord
+- A process is attached, still alive, and what state it's in
+- Whether clauderpc is also connected, since one Discord client only shows one activity
+
+Only the Discord-app checks need internet; presence itself is entirely local.
 
 Files: `%TEMP%\codex_rpc_target.json` (attachment), `%TEMP%\codex_rpc_daemon.json` (heartbeat), `%TEMP%\codex_rpc_daemon.log` (log).
 

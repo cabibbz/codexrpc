@@ -27,6 +27,8 @@ import re
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 TEMP = os.environ.get("TEMP") or "."
 TARGET_FILE = os.path.join(TEMP, "codex_rpc_target.json")
@@ -55,6 +57,142 @@ def get_app_id() -> str:
 def save_app_id(app_id: str) -> None:
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump({"app_id": app_id.strip()}, f)
+
+
+# ------------------------------------------------------------------- doctor
+
+ASSET_NAME = "codex"
+API = "https://discord.com/api/v9/oauth2/applications"
+OK, WARN, BAD = "ok", "warn", "bad"
+
+
+def discord_get(url: str):
+    req = urllib.request.Request(url, headers={"User-Agent": "codex-rpc"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read().decode())
+
+
+def check_discord_app(out: list, app_id: str) -> None:
+    try:
+        info = discord_get(f"{API}/{app_id}/rpc")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            out.append((BAD, "Discord doesn't recognise this Application ID",
+                        "Copy the ID from General Information at "
+                        "discord.com/developers/applications."))
+        else:
+            out.append((WARN, f"Discord API returned HTTP {exc.code}",
+                        "Not fatal - try again in a moment."))
+        return
+    except Exception as exc:
+        out.append((WARN, f"Couldn't reach Discord's API ({exc.__class__.__name__})",
+                    "Only this check needs internet; presence itself is local."))
+        return
+
+    out.append((OK, f'Discord app found: "{info.get("name") or "(unnamed)"}"',
+                "This name is the banner's title line."))
+    try:
+        names = [a.get("name") for a in discord_get(f"{API}/{app_id}/assets")]
+    except Exception as exc:
+        out.append((WARN, f"Couldn't list art assets ({exc.__class__.__name__})", ""))
+        return
+    if ASSET_NAME in names:
+        out.append((OK, f'Art asset "{ASSET_NAME}" uploaded', ""))
+    elif info.get("icon"):
+        out.append((WARN, f'No art asset named "{ASSET_NAME}"'
+                          + (f" (found: {', '.join(n for n in names if n)})" if names else ""),
+                    "The card falls back to your app icon, so it still looks fine. "
+                    f'For the intended image, upload a 512x512 PNG named exactly '
+                    f'"{ASSET_NAME}" under Rich Presence -> Art Assets.'))
+    else:
+        out.append((BAD, f'No art asset "{ASSET_NAME}" and no app icon',
+                    "The card will show a blank image. Upload a 512x512 PNG named "
+                    f'exactly "{ASSET_NAME}" under Rich Presence -> Art Assets.'))
+
+
+def run_checks() -> list:
+    """[(level, headline, fix), ...] - safe to call off the UI thread."""
+    out = []
+
+    app_id = get_app_id()
+    if app_id.isdigit():
+        if os.environ.get("CODEX_DISCORD_APP_ID", "").strip():
+            src = "environment variable"
+        elif str(load_config_app_id() or "") == app_id:
+            src = "saved settings"
+        else:
+            src = "built-in default"
+        out.append((OK, f"Application ID set ({app_id}, from {src})", ""))
+        check_discord_app(out, app_id)
+    else:
+        out.append((BAD, "No Discord Application ID",
+                    "Type it into the Application ID box and click Save."))
+
+    pid = daemon_pid()
+    hb = read_json(HEARTBEAT_FILE)
+    if pid:
+        out.append((OK, f"Daemon running (pid {pid})", ""))
+        if hb.get("discord") == "connected":
+            out.append((OK, "Connected to Discord", ""))
+        else:
+            out.append((WARN, "Daemon can't reach Discord yet",
+                        "Start the Discord desktop app - the browser version has no "
+                        "RPC socket. The daemon retries every 15 seconds."))
+    else:
+        out.append((BAD, "Daemon not running",
+                    "Pick a process below and click Attach & start."))
+
+    target = read_json(TARGET_FILE)
+    status = hb.get("target_status")
+    if not target.get("pid"):
+        out.append((BAD, "No process attached",
+                    "Select your Codex process in the list and click Attach & start."))
+    elif status == "ok":
+        out.append((OK, f'Attached to "{hb.get("target_label")}" '
+                        f'(pid {hb.get("target_pid")}), currently {hb.get("activity")}', ""))
+    elif status == "exited":
+        out.append((WARN, "The attached process has exited",
+                    "Auto-reattach picks up a new one with the same program; "
+                    "otherwise attach again." if target.get("auto_reattach")
+                    else "Attach to the new process, or tick auto-reattach."))
+    else:
+        out.append((WARN, "Attachment saved but the daemon hasn't confirmed it yet",
+                    "Give it 5 seconds, then re-run this check."))
+
+    if read_json(os.path.join(TEMP, "claude_rpc_daemon.json")).get("discord") \
+            == "connected":
+        out.append((WARN, "claude-rpc is also connected to Discord",
+                    "One Discord client shows one activity, so only one banner is "
+                    "visible. Stop the other daemon, or run a second Discord client "
+                    "(PTB/Canary) to show both."))
+    return out
+
+
+def load_config_app_id():
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return str(json.load(f).get("app_id") or "").strip()
+    except Exception:
+        return ""
+
+
+def set_run_at_login(exe: str, enable: bool) -> str:
+    lnk = os.path.join(os.environ.get("APPDATA", TEMP), "Microsoft", "Windows",
+                       "Start Menu", "Programs", "Startup", "Codex RPC.lnk")
+    if not enable:
+        try:
+            os.remove(lnk)
+        except OSError:
+            pass
+        return "Removed from login startup."
+    ps = (f"$w = New-Object -ComObject WScript.Shell; "
+          f"$s = $w.CreateShortcut('{lnk}'); $s.TargetPath = '{exe}'; "
+          f"$s.Arguments = 'daemon'; "
+          f"$s.Description = 'Discord Rich Presence for Codex'; $s.Save()")
+    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                   capture_output=True, creationflags=0x08000000)
+    return "Added to login startup." if os.path.exists(lnk) else \
+        "Could not create the startup shortcut."
 
 TICK_SECONDS = 5          # CPU sample + heartbeat cadence
 CPU_THRESHOLD = float(os.environ.get("CODEX_RPC_CPU_THRESHOLD", "0.5"))  # % of one core
@@ -381,7 +519,13 @@ def resource_path(name: str) -> str:
     return os.path.join(base, name)
 
 
+def exe_path() -> str:
+    return sys.executable if getattr(sys, "frozen", False) \
+        else os.path.abspath(__file__)
+
+
 def ui_mode() -> int:
+    import threading
     import tkinter as tk
     import psutil
 
@@ -569,6 +713,70 @@ def ui_mode() -> int:
     tk.Button(ctlrow, text="Save", command=save_id, bg=CARD, fg=FG,
               activebackground="#404249", activeforeground=FG, relief="flat",
               font=("Segoe UI", 9), padx=12, pady=2).pack(side="left")
+
+    def open_doctor():
+        win = tk.Toplevel(root)
+        win.title("Check my setup")
+        win.configure(bg=BG, padx=16, pady=14)
+        win.transient(root)
+        try:
+            win.iconbitmap(resource_path("codex-rpc.ico"))
+        except Exception:
+            pass
+        txt = tk.Text(win, width=88, height=20, bg=CARD, fg=FG, relief="flat",
+                      font=("Segoe UI", 9), state="disabled", padx=12, pady=10,
+                      wrap="word", spacing1=2, spacing3=2)
+        txt.grid(row=0, column=0, sticky="ew")
+        txt.tag_configure(OK, foreground=GREEN)
+        txt.tag_configure(WARN, foreground=YELLOW)
+        txt.tag_configure(BAD, foreground=RED)
+        txt.tag_configure("fix", foreground=DIM, lmargin1=22, lmargin2=22)
+
+        def render(results):
+            marks = {OK: "OK   ", WARN: "!    ", BAD: "X    "}
+            txt.config(state="normal")
+            txt.delete("1.0", "end")
+            for level, headline, fix in results:
+                txt.insert("end", marks[level] + headline + "\n", level)
+                if fix:
+                    txt.insert("end", fix + "\n", "fix")
+                txt.insert("end", "\n")
+            bad = sum(1 for lvl, _, _ in results if lvl == BAD)
+            warn = sum(1 for lvl, _, _ in results if lvl == WARN)
+            if bad:
+                txt.insert("end", f"{bad} thing(s) need fixing.", BAD)
+            elif warn:
+                txt.insert("end", "Working, with some notes above.", WARN)
+            else:
+                txt.insert("end", "Everything checks out.", OK)
+            txt.config(state="disabled")
+
+        def run():
+            render([(WARN, "Checking…", "")])
+
+            def work():
+                results = run_checks()
+                root.after(0, lambda: render(results))
+
+            threading.Thread(target=work, daemon=True).start()
+
+        tk.Button(win, text="Re-run", command=run, bg=CARD, fg=FG,
+                  activebackground="#404249", activeforeground=FG, relief="flat",
+                  font=("Segoe UI", 9), padx=12, pady=4).grid(row=1, column=0,
+                                                              sticky="w", pady=(10, 0))
+        run()
+
+    styled_btn(ctlrow, "Check my setup", open_doctor).pack(side="left", padx=(16, 0))
+
+    lnk_path = os.path.join(os.environ.get("APPDATA", TEMP), "Microsoft", "Windows",
+                            "Start Menu", "Programs", "Startup", "Codex RPC.lnk")
+    login_var = tk.BooleanVar(value=os.path.exists(lnk_path))
+    tk.Checkbutton(ctlrow, text="Start at login", variable=login_var,
+                   command=lambda: msg_var.set(set_run_at_login(exe_path(),
+                                                                login_var.get())),
+                   bg=BG, fg=DIM, selectcolor=CARD, activebackground=BG,
+                   activeforeground=FG, font=("Segoe UI", 9)).pack(side="left",
+                                                                   padx=(12, 0))
 
     log_box = tk.Text(root, height=5, width=86, bg=CARD, fg=DIM, relief="flat",
                       font=("Consolas", 8), state="disabled", padx=8, pady=6)

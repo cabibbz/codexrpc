@@ -37,8 +37,10 @@ Re-attach any time from the UI; the daemon follows within 5 s without restarting
 
 ```powershell
 py -m pip install pypresence psutil pyinstaller
-py -m PyInstaller --onedir --noconsole --name codex-rpc --noconfirm codex_rpc.py
+py -m PyInstaller --onedir --noconsole --icon codex-rpc.ico --add-data "codex-rpc.ico;." --name codex-rpc --noconfirm codex_rpc.py
 ```
+
+`--icon` sets the EXE's file icon; `--add-data` ships the same `.ico` inside the bundle so the app window and taskbar entry use it too. To regenerate the icon from other artwork: `py make_icons.py <source-image> codex-rpc.ico preview.png --tile` (the `--tile` flag puts monochrome art on a white rounded tile — without it, black artwork is invisible on a dark taskbar).
 
 3. Double-click `dist\codex-rpc\codex-rpc.exe`, pick your Codex process, **Attach & start**.
 

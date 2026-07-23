@@ -376,6 +376,11 @@ def exe_command(*args):
     return [sys.executable, os.path.abspath(__file__), *args]
 
 
+def resource_path(name: str) -> str:
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, name)
+
+
 def ui_mode() -> int:
     import tkinter as tk
     import psutil
@@ -384,6 +389,10 @@ def ui_mode() -> int:
     root.title("Codex RPC")
     root.configure(bg=BG, padx=16, pady=14)
     root.resizable(False, False)
+    try:
+        root.iconbitmap(resource_path("codex-rpc.ico"))
+    except Exception:
+        pass  # window icon is cosmetic
 
     tk.Label(root, text="Codex — Discord Rich Presence", bg=BG, fg=FG,
              font=("Segoe UI Semibold", 11)).grid(row=0, column=0, columnspan=3,
